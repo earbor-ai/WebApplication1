@@ -1,0 +1,22 @@
+﻿@page
+@model WebApplication1.Pages.UploadModel
+@{
+    ViewData["Title"] = "File Upload";
+}
+
+<h2>@ViewData["Title"]</h2>
+
+@if (Model.Message != null)
+{
+    <div class="alert alert-success">
+        @Model.Message
+    </div>
+}
+
+<form method="post" enctype="multipart/form-data">
+    <div class="form-group">
+        <label for="file">Choose file to upload</label>
+        <input type="file" class="form-control-file" id="file" name="file">
+    </div>
+    <button type="submit" class="btn btn-primary">Upload</button>
+</form>
