@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app  # Ensure this matches your application's label
+  template:
+    metadata:
+      labels:
+        app: my-app  # Ensure this matches your application's label
+    spec:
+      containers:
+        - name: upload
+          image: aravindaravind/fileupload-app:1.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - mountPath: "/app/wwwroot/upload"
+              name: uploads-wms-volume
+      initContainers:
+        - name: init-upload-wms
+          image: aravindaravind/fileupload-app:1.0
+          command: ['sh', '-c', 'cp -r /app/wwwroot/upload/* /opt/bolx']
+          volumeMounts:
+            - mountPath: /opt/bolx
+              name: uploads-wms-volume
+      volumes:
+        - name: uploads-wms-volume
+          persistentVolumeClaim:
+            claimName: uploads-pvc  # Ensure this matches your PVC name
+      imagePullSecrets:
+        - name: dockerhub  # Ensure your DockerHub secret name is correct and defined in your cluster
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - master
+                      - node1  # Ensure these match your actual node names
+                      - node

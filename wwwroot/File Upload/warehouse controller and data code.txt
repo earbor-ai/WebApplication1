@@ -1,0 +1,235 @@
+using DataAccess.Db;
+using WMS.Models;
+using Microsoft.Extensions.Configuration;
+using WMS.Services;
+
+namespace WMS.WMSDBAccessLayer
+{
+    public class WarehouseData
+    {
+        //Get Warehouses Data
+        public ResponseClass GetWarehouses(ILogger _logger)
+        {
+            ResponseClass resresult = new ResponseClass();
+            try
+            {
+                using (WMSContext db = new WMSContext())
+                {
+                    var records = (from w in db.Warehouses
+                                   join whl in db.Whlocations on w.Uniqueid equals whl.Whid into loc
+                                   from whl in loc.DefaultIfEmpty()
+                                   where w.Isactive == true
+                                   group new { whl } by new { w.Uniqueid, whl.Whid, w.Whname, w.Address, w.City, w.State, w.Postalcode, w.Phone, w.Email } into pg
+                                   select new
+                                   {
+                                       Uniqueid = pg.Key.Whid,
+                                       Warehousename = pg.Key.Whname,
+                                       Address = pg.Key.Address,
+                                       City = pg.Key.City,
+                                       State = pg.Key.State,
+                                       Postalcode = pg.Key.Postalcode,
+                                       Phone = pg.Key.Phone,
+                                       Email = pg.Key.Email,
+                                       DefaultLocation = pg.Select(x => x.whl).Where(x => x.Isdefault == true && x.Locationtype.ToUpper() == "PICK LOCATION").
+                                                        Select(x => x.Location).FirstOrDefault(),
+                                       DefaultPallet = pg.Select(x => x.whl).Where(x => x.Isdefault == true && x.Locationtype.ToUpper() == "PALLET").
+                                                        Select(x => x.Location).FirstOrDefault(),
+                                   }).ToList();
+                    resresult.Data = records;
+                }
+                resresult.responsecode = 200;
+                resresult.responsemessage = "Success!";
+                _logger.LogInformation("Get Warehouses");
+            }
+            catch (Exception ex)
+            {
+                resresult.responsecode = 500;
+                resresult.responsemessage = "Error: Server Error, Try Again!";
+                _logger.LogError("Get Warehouses- " + ex.ToString());
+            }
+            return resresult;
+        }
+
+        //Create and Update Warehouses
+        public ResponseClass CreateandUpdateWarehouse(warehousemodel _whmodel, ILogger _logger, int loginid)
+        {
+            ResponseClass resresult = new ResponseClass();
+            using (WMSContext db = new WMSContext())
+            {
+                try
+                {
+                    if (_whmodel.whid != null && _whmodel.whid != 0)
+                    {
+                        var wa = db.Warehouses.Where(x => x.Uniqueid == _whmodel.whid).FirstOrDefault();
+                        wa.Whname = _whmodel.Warehousename;
+                        wa.Address = _whmodel.Address;
+                        wa.City = _whmodel.City;
+                        wa.State = _whmodel.State;
+                        wa.Postalcode = _whmodel.Postalcode;
+                        wa.Phone = _whmodel.Phone;
+                        wa.Email = _whmodel.Email;
+                        wa.Entrydate = DateTime.Now;
+                        wa.Entryuserid=loginid;
+                        db.Update(wa);
+                        db.SaveChanges();
+
+                        var locinfo = db.Whlocations.Where(x => x.Whid == _whmodel.whid && x.Isdefault == true && x.Locationtype == "Pick Location").FirstOrDefault();
+                        if (locinfo != null)
+                        {
+                            locinfo.Isdefault = true;
+                            locinfo.Locationtype = "Pick Location";
+                            locinfo.Entrydate = DateTime.Now;
+                            locinfo.Location = _whmodel.DefaultLocation;
+                            locinfo.Entryuserid = loginid;
+                            db.Update(locinfo);
+                            db.SaveChanges();
+                        }
+                        var palinfo = db.Whlocations.Where(x => x.Whid == _whmodel.whid
+                        && x.Isdefault == true && x.Locationtype == "Pallet").FirstOrDefault();
+                        if (palinfo != null)
+                        {
+                            palinfo.Isdefault = true;
+                            palinfo.Locationtype = "Pallet";
+                            palinfo.Entrydate = DateTime.Now;
+                            palinfo.Entryuserid = loginid;
+                            palinfo.Location = _whmodel.DefaultPallet;
+                            db.Update(palinfo);
+                            db.SaveChanges();
+                        }
+                        resresult.responsecode = 200;
+                        resresult.responsemessage = "Warehouse Updated Successfully";
+                        _logger.LogInformation(" Update Warehouse");
+                    }
+                    else
+                    {
+                        Warehouse wh = new Warehouse();
+                        wh.Whname = _whmodel.Warehousename;
+                        wh.Address = _whmodel.Address;
+                        wh.City = _whmodel.City;
+                        wh.State = _whmodel.State;
+                        wh.Postalcode = _whmodel.Postalcode;
+                        wh.Phone = _whmodel.Phone;
+                        wh.Email = _whmodel.Email;
+                        wh.Entrydate = DateTime.Now;
+                        wh.Entryuserid = loginid;
+                        db.Add(wh);
+                        db.SaveChanges();
+                        Whlocation whl = new Whlocation();
+                        whl.Isdefault = true;
+                        whl.Locationtype = "Pick Location";
+                        whl.Entrydate = DateTime.Now;
+                        whl.Entryuserid = loginid;
+                        whl.Modifieduserid = loginid;
+                        whl.Whid = wh.Uniqueid;
+                        whl.Location = _whmodel.DefaultLocation;
+                        db.Add(whl);
+                        db.SaveChanges();
+                        Whlocation loc = new Whlocation();
+                        loc.Isdefault = true;
+                        loc.Locationtype = "Pallet";
+                        loc.Entrydate = DateTime.Now;
+                        loc.Entryuserid = loginid;
+                        loc.Modifieduserid = loginid;
+                        loc.Whid = wh.Uniqueid;
+                        loc.Location = _whmodel.DefaultPallet;
+                        db.Add(loc);
+                        db.SaveChanges();
+                    }
+                    resresult.responsecode = 200;
+                    resresult.responsemessage = " New Warehouse Created Successfully";
+                    _logger.LogInformation(" Create New Warehouse");
+                }
+                catch (Exception ex)
+                {
+                    resresult.responsecode = 500;
+                    resresult.responsemessage = "Error: Server Error, Try Again!";
+                }
+                return resresult;
+            }
+        }
+
+    }
+
+    public class warehousemodel
+    {
+        public int whid { get; set; }
+        public string Warehousename { get; set; }
+        public string Address { get; set; }
+        public string City { get; set; }
+        public string State { get; set; }
+        public string Postalcode { get; set; }
+        public string Phone { get; set; }
+        public string Email { get; set; }
+        public string DefaultPallet { get; set; }
+        public string DefaultLocation { get; set; }
+    }
+}
+
+
+
+
+
+
+
+
+
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using DataAccess.Db;
+using WMS.WMSDBAccessLayer;
+using System.Security.Claims;
+using static WMS.WMSDBAccessLayer.WarehouseData;
+using WMS.Services;
+using WMS.Configuration;
+using Microsoft.Extensions.Options;
+using WMS.ViewModel;
+using Microsoft.AspNetCore.Http;
+
+namespace WMS.Controllers
+{
+    public class WarehouseController : Controller
+    {
+        private readonly ILogger<WarehouseController> _logger;
+        private static IHttpContextAccessor HttpContextAccessor;
+
+        WarehouseData Blogic = new WarehouseData();
+        SecurityClass security = new SecurityClass();
+
+        public WarehouseController(IHttpContextAccessor httpContextAccessor, ILogger<WarehouseController> logger)
+        {
+            HttpContextAccessor = httpContextAccessor;
+            _logger = logger;
+        }
+
+        //Warehouse Management
+        [Authorize]
+        public IActionResult Index()
+        {
+            int loginid = Convert.ToInt32(HttpContext.User.Claims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier)?.Value);
+            var isModuleAccess = security.IsUserAccessModule("Warehouse Management", loginid);
+            if (!isModuleAccess)
+            {
+                return RedirectToAction("Index", "Authentication");
+            }
+            return View();
+        }
+
+        //Get Warehouses
+        [HttpGet]
+        public JsonResult GetWarehouselist()
+        {
+            var data = Blogic.GetWarehouses(_logger);
+            return Json(data);
+        }
+
+        //Create and Update Warehouse
+        [HttpPost]
+        public JsonResult Createandupdatewarehouses(warehousemodel _whmodel)
+        {
+            int loginid = Convert.ToInt32(HttpContext.User.Claims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier)?.Value);
+            var data = Blogic.CreateandUpdateWarehouse(_whmodel, _logger, loginid);
+            return Json(data);
+        }
+    }
+}
+

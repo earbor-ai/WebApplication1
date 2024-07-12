@@ -1,0 +1,1282 @@
+using MessagePack;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.CodeAnalysis;
+using System;
+using System.Security.Claims;
+using DataAccess.Db;
+using Nest;
+
+namespace WMS.Controllers
+{
+    public class BaseController : Controller
+    {
+        private readonly ILogger<BaseController> _logger;
+        WMSDBAccessLayer.POScheduleData _poScheduleDBClass = new WMSDBAccessLayer.POScheduleData();
+
+        public BaseController(ILogger<BaseController> logger)
+        {
+            _logger = logger;
+        }
+
+        public IActionResult Index()
+        {
+            return View();
+        }
+
+        ////Module to Access based on Login
+        //public IActionResult ModuleAccess()
+        //{
+        //    int userid = Convert.ToInt32(HttpContext.User.Claims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier)?.Value);
+        //    using (WMSContext db = new WMSContext())
+        //    {
+        //        var moduleToAccess = (from wum in db.Whusermodules
+        //                              join wm in db.Whmodules on wum.Moduleid equals wm.Uniqueid
+        //                              where wum.Userid == userid
+        //                              select new
+        //                              {
+        //                                  wum.Userid,
+        //                                  wum.Moduleid,
+        //                                  wm.Modulename
+        //                              }).ToList();
+        //        return Json(moduleToAccess);
+        //    }
+        //}
+
+        //Module to Access based on Login
+        public IActionResult ModuleAccess()
+        {
+            int userid = Convert.ToInt32(HttpContext.User.Claims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier)?.Value);
+            using (WMSContext db = new WMSContext())
+            {
+                try
+                {
+                    var module_check = db.Whusers.Where(wu => wu.Uniqueid == userid && wu.Allmodulesaccess == true).Select(u => u.Uniqueid).FirstOrDefault();
+                    if (module_check != 0)
+                    {
+                        return Json("");
+                    }
+                    else
+                    {
+                        var moduleToAccess = (from wm in db.Whmodules
+                                              join wm1 in db.Whmodules on wm.Parentid equals wm1.Uniqueid
+                                              join wum in db.Whusermodules on wm.Uniqueid equals wum.Moduleid
+                                              where wm.Isactive == true && wum.Userid == userid
+                                              select new
+                                              {
+                                                  wm.Parentid,
+                                                  wm1.Modulename,
+                                                  wm.Uniqueid,
+                                                  wmmodulename = wm.Modulename,
+                                                  wm.Isactive,
+                                                  wum.Userid
+                                              }).ToList();
+                        return Json(moduleToAccess);
+                    }
+                }
+                catch (Exception)
+                {
+                    throw;
+                }
+
+            }
+        }
+
+        //Get PO Number
+        public ActionResult GetPONumbers()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                try
+                {
+                    var poList = _poScheduleDBClass.GetPOList(_logger);
+                    return Json(poList);
+                }
+                catch (Exception ex)
+                {
+
+                }
+            }
+            return Json(null);
+        }
+
+        //Search by PO Number
+        [HttpPost]
+        public JsonResult GetPONumbersSearch(string PONo)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var poList = (from N in db.Roreceivings
+                              where N.Ronumber.ToUpper().StartsWith(PONo.ToUpper())
+                              select new { N.Ronumber }).ToList();
+                return Json(poList);
+            }
+        }
+
+        //Load All Client
+        public ActionResult LoadAllClient()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var clientList = db.Whclients.Where(x => x.Isactive == true).OrderBy(a => a.Clientname).ToList();
+                return Json(clientList);
+            }
+        }
+
+        //Load Client
+        public ActionResult OrderLoadClient(int warehouseid)
+        {
+            List<Whclient> clients = new List<Whclient>();
+            using (WMSContext db = new WMSContext())
+            {
+                int loginid = Convert.ToInt32(HttpContext.User.Claims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier)?.Value);
+                var userObj = db.Whusers.Where(w => w.Uniqueid == loginid).FirstOrDefault();
+                var clientList = db.Whclients.Where(x => x.Isactive == true && x.Warehouseid.Contains(warehouseid))
+                    .Select(c => new { c.Uniqueid, c.Clientname })
+                    .AsEnumerable() // execute the first query on the database server
+                    .Concat(new[] { new { Uniqueid = 0, Clientname = "ALL" } })
+                      .ToList().OrderBy(a => a.Clientname);
+                if (userObj != null)
+                {
+                    if (userObj.Allclientsaccess)
+                    {
+                        return Json(clientList);
+                    }
+                    else
+                    {
+                        var clientAccessList = db.Whuserclients.Where(w => w.Userid == loginid && w.Isactive == true).ToList();
+                        foreach (var client in clientAccessList)
+                        {
+                            var fliterData = clientList.Where(a => a.Uniqueid == client.Clientid).FirstOrDefault();
+                            clients.Add(new Whclient { Uniqueid = fliterData.Uniqueid, Clientname = fliterData.Clientname });
+                        }
+                        return Json(clients);
+                    }
+                }
+            }
+            return Json(clients);
+        }
+
+        //RO Load Client
+        public ActionResult ROOrderLoadClient(int warehouseid)
+        {
+            List<Whclient> clients = new List<Whclient>();
+            using (WMSContext db = new WMSContext())
+            {
+                int loginid = Convert.ToInt32(HttpContext.User.Claims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier)?.Value);
+                var userObj = db.Whusers.Where(w => w.Uniqueid == loginid).FirstOrDefault();
+                var clientList = db.Whclients.Where(x => x.Isactive == true && x.Warehouseid.Contains(warehouseid))
+                    .Select(c => new { c.Uniqueid, c.Clientname })
+                    .AsEnumerable() // execute the first query on the database server
+                      .ToList().OrderBy(a => a.Clientname);
+                if (userObj != null)
+                {
+                    if (userObj.Allclientsaccess)
+                    {
+                        return Json(clientList);
+                    }
+                    else
+                    {
+                        var clientAccessList = db.Whuserclients.Where(w => w.Userid == loginid && w.Isactive == true).ToList();
+                        foreach (var client in clientAccessList)
+                        {
+                            var fliterData = clientList.Where(a => a.Uniqueid == client.Clientid).FirstOrDefault();
+                            clients.Add(new Whclient { Uniqueid = fliterData.Uniqueid, Clientname = fliterData.Clientname });
+                        }
+                        return Json(clients);
+                    }
+                }
+            }
+            return Json(clients);
+        }
+
+        //Load Client
+        public ActionResult LoadClient()
+        {
+            List<Whclient> clients = new List<Whclient>();
+            using (WMSContext db = new WMSContext())
+            {
+                int loginid = Convert.ToInt32(HttpContext.User.Claims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier)?.Value);
+                var userObj = db.Whusers.Where(w => w.Uniqueid == loginid).FirstOrDefault();
+                var clientList = db.Whclients.Where(x => x.Isactive == true)
+                    .Select(c => new { c.Uniqueid, c.Clientname })
+                      .ToList().OrderBy(a => a.Clientname);
+
+                if (userObj != null)
+                {
+                    if (userObj.Allclientsaccess)
+                    {
+                        return Json(clientList);
+                    }
+                    else
+                    {
+                        var clientAccessList = db.Whuserclients.Where(w => w.Userid == loginid && w.Isactive == true).ToList();
+                        foreach (var client in clientAccessList)
+                        {
+                            var fliterData = clientList.Where(a => a.Uniqueid == client.Clientid).FirstOrDefault();
+                            clients.Add(new Whclient { Uniqueid = fliterData.Uniqueid, Clientname = fliterData.Clientname });
+                        }
+                        return Json(clients);
+                    }
+                }
+            }
+            return Json(clients);
+        }
+
+        //Load Application Module
+        public ActionResult LoadApplicationModule()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                //var moduleList = db.Whmodules.Select(a => new { a.Uniqueid, a.Modulename }).ToList();
+
+                // var moduleList = db.Whmodules.Select(a => new { a.Uniqueid, a.Modulename, a.Parentid }).ToList();
+
+                var moduleAccessData = (from wm in db.Whmodules
+                                        join wm1 in db.Whmodules on wm.Parentid equals wm1.Uniqueid
+                                        where wm.Parentid != null && wm.Isactive == true
+                                        select new
+                                        {
+                                            wm.Uniqueid,
+                                            childmodulename = wm.Modulename,
+                                            parentmodulename = wm1.Modulename
+                                        }).ToList();
+                return Json(moduleAccessData);
+            }
+        }
+
+        //Get Client Integration for Dropdown
+        public ActionResult LoadClientIntegration()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var clientIntegrationList = db.Integrationtypes.OrderBy(a => a.Integrationname).Where(a => a.Type == "Channel" && a.Isactive == true).ToList();
+                return Json(clientIntegrationList);
+            }
+        }
+        public ActionResult LoadShipmentIntegration()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var clientIntegrationList = db.Integrationtypes.OrderBy(a => a.Integrationname).Where(a => a.Type == "Shipment" && a.Isactive == true).ToList();
+                return Json(clientIntegrationList);
+            }
+        }
+
+        //Load Client Integration Properties
+        public ActionResult LoadClientintegrationproperties()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var clientIntegrationpropertiesList = db.Integrationproperties.OrderBy(a => a.Integrationtypeid).Where(a => a.Status == true).ToList();
+                return Json(clientIntegrationpropertiesList);
+            }
+        }
+
+        //Load States
+        public ActionResult LoadStates()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var stateList = db.States.OrderBy(a => a.State1).ToList();
+                return Json(stateList);
+            }
+        }
+
+        //Load States based on Country
+        public ActionResult LoadStatesByCountry(string ctext)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var statebycountryList = db.States.Where(s => s.Country == ctext).Select(s => new { s.State1, s.Statename }).ToList();
+                return Json(statebycountryList);
+            }
+        }
+
+        //Load Ship methods
+        public ActionResult LoadShipmethods()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var shipList = db.Carrierservices.OrderBy(a => a.Shipvianame).ToList();
+                return Json(shipList);
+            }
+        }
+
+        //Locations Location
+        public ActionResult LoadLocations()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var locationList = db.Whlocations.OrderBy(a => a.Location).Where(a => a.Isactive == true).ToList();
+                return Json(locationList);
+            }
+
+        }
+
+        //Locations Location
+        public ActionResult GetDockLocation()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var locationList = db.Whlocations.OrderBy(a => a.Location).Where(a => a.Isactive == true && a.Location == "DOCK").FirstOrDefault();
+                return Json(locationList);
+            }
+
+        }
+
+        //Load particular Locations for Assign Location in Kit Dashboard
+        public ActionResult LoadRequiredLocations()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                List<Whlocation> whlocations = new List<Whlocation>();
+                var whlocList = db.Whlocations.ToList();
+                List<string> locValues = new List<string>() { "Overstock", "Pick Location", "Pick Bin Location", "Floor Location" };
+                whlocations = db.Whlocations.Where(p => locValues.Contains(p.Locationtype) && p.Isactive == true).ToList();
+                return Json(whlocations);
+            }
+        }
+
+        public ActionResult LoadLocationsm(string loc, int whid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                //&& a.Location.ToUpper().Contains(loc.ToUpper())
+                List<string> locValues = new List<string>() { "Overstock", "Pick Location", "Pick Bin Location", "Floor Location" };
+                var locationList = db.Whlocations.OrderBy(a => a.Location).Where(a => a.Isactive == true && a.Whid.Equals(whid) && locValues.Contains(a.Locationtype) && a.Location.ToUpper().Contains(loc.ToUpper())).ToList();
+                return Json(locationList);
+            }
+
+        }
+        //Load Carrier
+        public ActionResult LoadCarrier()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var carrierList = db.Carriers.OrderBy(a => a.Carriername).Where(a => a.Isactive == true).ToList();
+                return Json(carrierList);
+            }
+        }
+
+        //Load Shipping Locations
+        public ActionResult LoadShipLoc()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var shipList = db.Whlocations.OrderBy(a => a.Uniqueid).Where(a => a.Locationtype == "Shipping").Select(s => new { s.Uniqueid, s.Location }).ToList();
+                return Json(shipList);
+            }
+        }
+
+        // Load Carrier Type 
+        public ActionResult LoadCarrierType()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var carrierTypeList = db.Carriertypes.OrderBy(a => a.Carriertypename).Where(a => a.Isactive == true).ToList();
+                return Json(carrierTypeList);
+            }
+        }
+
+        //Load Damage Reason 
+        public ActionResult LoadDamageReason()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var damageReasonList = db.Damagereasons.OrderBy(a => a.Damagecode).ToList();
+                return Json(damageReasonList);
+            }
+        }
+
+        //Load Client SKUs 
+        public ActionResult LoadClientSKUs(int cid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var clientSkuList = db.Skus.OrderBy(a => a.Sku1).Where(a => a.Clientid == cid && a.Status == "Active").ToList();
+                return Json(clientSkuList);
+            }
+        }
+        //Load Report Client SKUs
+        public ActionResult LoadReportClientSKUs(int cid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+
+                //  var clientSkuList = db.Skus.OrderBy(a => a.Sku1).Where(a => a.Clientid == cid && a.Status == "Active").ToList();
+
+                var result = (from s in db.Skus
+                              where s.Clientid == cid && s.Status == "Active"
+                              select new
+                              {
+                                  s.Skuid,
+                                  s.Sku1
+                              }).OrderBy(a => a.Sku1).ToList();
+                return Json(result);
+            }
+        }
+
+
+        //Description load
+        public ActionResult LoadReportDescription(int cid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+
+                //  var clientSkuList = db.Skus.OrderBy(a => a.Sku1).Where(a => a.Clientid == cid && a.Status == "Active").ToList();
+                var result = (from s in db.Skus
+                              join sk in db.Skubarcodes on s.Skuid equals sk.Skuid into g
+                              from sk in g.DefaultIfEmpty()
+                              where s.Clientid == cid && s.Status == "Active"
+                              select new
+                              {
+                                  s.Skuid,
+                                  s.Sku1,
+                                  skubarcode = sk.Barcode.FirstOrDefault() == null ? s.Sku1 : sk.Barcode,
+                                  //SkuWithBarcode = db.Skubarcodes.Where(x => x.Skuid == sk.Skuid).Select(x => x.Barcode).FirstOrDefault() == null ? s.Sku1 : db.Skubarcodes.Where(x => x.Skuid == sk.Skuid).Select(x => x.Barcode).FirstOrDefault(),
+                                  s.Description,
+
+                              }).ToList();
+                return Json(result);
+            }
+        }
+        public ActionResult LoadReportClientBarcodeSKUs(int cid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var result = (from sl in db.Skubarcodes
+                              join s in db.Skus on sl.Skuid equals s.Skuid
+                              join sil in db.Skuinventorylocations on sl.Skuid equals sil.Skuid
+                              join l in db.Whlocations on sil.Locationid equals l.Uniqueid
+                              where s.Clientid == cid && s.Status == "Active"
+                              select new
+                              {
+                                  value = $"{s.Description}_{sl.Barcode}_{l.Location}",
+                                  text = s.Sku1
+                              }).DistinctBy(a => a.text).ToList();
+                return Json(result);
+            }
+        }
+
+        public ActionResult LoadSKUBarcod(int skuid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var result = (from sl in db.Skubarcodes
+                              join s in db.Skus on sl.Skuid equals s.Skuid
+                              join sil in db.Skuinventorylocations on sl.Skuid equals sil.Skuid
+                              join l in db.Whlocations on sil.Locationid equals l.Uniqueid
+                              where sl.Skuid == skuid
+                              select new
+                              {
+                                  value = sl.Barcode,
+                                  text = sl.Packagetype
+                              }).Distinct().ToList();
+                return Json(result);
+            }
+        }
+        public ActionResult GetDetailsBySkuId(int skuid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var result = (from sl in db.Skuinventorylocations
+                              join s in db.Skus on sl.Skuid equals s.Skuid
+                              join l in db.Whlocations on sl.Locationid equals l.Uniqueid
+                              where sl.Skuid == skuid
+                              select new
+                              {
+                                  s.Description,
+                                  l.Location
+                              }).ToList();
+                if (result.Count == 0)
+                {
+                    result = (from sl in db.Skus
+                              where sl.Skuid == skuid
+                              select new
+                              {
+                                  sl.Description,
+                                  Location = ""
+                              }).ToList();
+
+                }
+                return Json(result);
+            }
+        }
+
+        public ActionResult LoadReportClientTypeSKUs(int cid, string itemtype)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var result = (from s in db.Skus
+                              where (cid == 0 || s.Clientid == cid)
+                             && (itemtype == null || s.Itemtype == itemtype)
+                             && s.Status == "Active"
+                              select new
+                              {
+                                  s.Skuid,
+                                  s.Sku1
+                              }).OrderBy(a => a.Sku1).ToList();
+                return Json(result);
+            }
+        }
+
+        //Load Report Client Serial SKUs
+        public ActionResult LoadReportClientSerialSKUs(int cid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+
+                //  var clientSkuList = db.Skus.ToList().OrderBy(a => a.Sku1).Where(a => a.Clientid == cid && a.Status == "Active");
+
+                var result = (from s in db.Skus
+                              join os in db.OrderskuSerials on s.Skuid equals os.Skuid
+                              where s.Clientid == cid && s.Status == "Active"
+                              select new
+                              {
+                                  s.Skuid,
+                                  s.Sku1
+                              }).OrderBy(a => a.Sku1).Distinct().ToList();
+                return Json(result);
+            }
+        }
+        //Load Aisles
+        public ActionResult LoadAisles(int whid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+
+                var result = (from s in db.Whlocations
+                              join sl in db.Skuinventorylocations on s.Uniqueid equals sl.Locationid
+                              where s.Whid == whid
+                              select new
+                              {
+                                  s.Aisle
+                              }).OrderBy(a => a.Aisle).DistinctBy(a => a.Aisle).ToList();
+                return Json(result);
+            }
+        }
+        //Load Rack
+        public ActionResult LoadRack(string aisle)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+
+                var result = (from s in db.Whlocations
+                              join sl in db.Skuinventorylocations on s.Uniqueid equals sl.Locationid
+                              where s.Aisle == aisle
+                              select new
+                              {
+                                  s.Rack
+                              }).OrderBy(a => a.Rack).DistinctBy(a => a.Rack).ToList();
+                return Json(result);
+            }
+        }
+        //Load Row
+        public ActionResult LoadRow(string row)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+
+                var result = (from s in db.Whlocations
+                              join sl in db.Skuinventorylocations on s.Uniqueid equals sl.Locationid
+                              where s.Rack == row
+                              select new
+                              {
+                                  s.Row
+                              }).OrderBy(a => a.Row).DistinctBy(a => a.Row).ToList();
+                return Json(result);
+            }
+        }
+        //Load Shelf
+        public ActionResult LoadShelf(string shelf)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+
+                var result = (from s in db.Whlocations
+                              join sl in db.Skuinventorylocations on s.Uniqueid equals sl.Locationid
+                              where s.Row == shelf
+                              select new
+                              {
+                                  s.Shelf
+                              }).OrderBy(a => a.Shelf).DistinctBy(a => a.Shelf).ToList();
+                return Json(result);
+            }
+        }
+        //Load WH
+        public ActionResult LoadWH()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+
+                var result = (from s in db.Warehouses
+                              join wh in db.Whlocations on s.Uniqueid equals wh.Whid
+                              join sl in db.Skuinventorylocations on wh.Uniqueid equals sl.Locationid
+                              select new
+                              {
+                                  s.Uniqueid,
+                                  s.Whname
+                              }).OrderBy(a => a.Whname).DistinctBy(a => a.Whname).ToList();
+                return Json(result);
+            }
+        }
+
+        //Load Client SKUs Locations
+        public ActionResult LoadClientSKUsLocations(int cid, int skuid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var result = (from wh in db.Whlocations
+                              join sl in db.Skuinventorylocations on wh.Uniqueid equals sl.Locationid
+                              join sk in db.Skus on sl.Skuid equals sk.Skuid
+                              where sl.Skuid == skuid && sk.Clientid == cid && wh.Isactive == true
+                              select new
+                              {
+                                  wh.Uniqueid,
+                                  wh.Location
+                              }).ToList();
+                //var locationList = db.Whlocations.OrderBy(a => a.Location).Where(a => a.Isactive == true).ToList();
+                return Json(result);
+            }
+
+        }
+
+        //Load Client SKUs list and Itemtype = item based on client id for dropdown
+        public ActionResult LoadClientSKUsWithItems(int cid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var clientSkuList = db.Skus.OrderBy(a => a.Sku1).Where(a => a.Clientid == cid && a.Status == "Active").Select(x => new { x.Sku1, x.Skuid, x.Description }).ToList();
+                return Json(clientSkuList);
+            }
+        }
+
+        //Expiry Reason list for dropdown
+        public ActionResult ExpiryReasons()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var expiryReasons = db.Expiryreasons.ToList();
+                return Json(expiryReasons);
+            }
+        }
+
+        //Warehouse Dropdown in Item
+        public IActionResult LoadWarehouse()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var warehouseList = (from w in db.Warehouses
+                                     where (w.Isactive == true)
+                                     orderby w.Whname
+                                     select new { w.Uniqueid, w.Whname }).ToList();
+                return Json(warehouseList);
+            }
+        }
+
+        //Load Origin Dropdown in Item Page Load in SKU Management
+        public ActionResult LoadOrigin()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var countryList = db.Countries.OrderBy(a => a.Country1).ToList();
+                return Json(countryList);
+            }
+        }
+
+        //Load Country Dropdown in Create Order
+        public ActionResult LoadCountry()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var results = db.States.GroupBy(n => new { n.Country })
+                .Select(g => new {
+                    g.Key.Country
+                }).ToList();
+                return Json(results);
+            }
+        }
+
+        //Load Shipping Box 
+        public ActionResult LoadShippingBox()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var shippingboxList = db.Skushippingboxes.OrderBy(a => a.Shippingbox).ToList();
+                return Json(shippingboxList);
+            }
+        }
+
+        //Load Channel 
+        public ActionResult LoadChannel()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var channelList = (from s in db.Saleschannels
+                                   where (s.Isactive == true)
+                                   select new { s.Saleschannelid, s.Saleschannel1 }).ToList();
+                return Json(channelList);
+            }
+        }
+
+        //Load Adjustment Reason
+        public ActionResult LoadAdjustmentReason()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var adjustmentreasonList = db.AllStatuses.OrderBy(a => a.StatusName).Where(a => a.StatusCode == 8000).ToList();
+                return Json(adjustmentreasonList);
+            }
+        }
+
+        //Load Move Location 
+        public ActionResult LoadMoveLocation()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var movelocationList = (from w in db.Whlocations
+                                        select new { w.Uniqueid, w.Location }).ToList();
+                return Json(movelocationList);
+            }
+        }
+
+        //// Location Autocomplete 
+        //public ActionResult LocationAutocomplete(string loc)
+        //{
+        //    using (WMSContext db = new WMSContext())
+        //    {
+        //        var movelocationList = (from w in db.Whlocations
+        //                                where w.Location.ToUpper().Contains(loc.ToUpper())
+        //                                select new { w.Uniqueid, w.Location }).ToList().Take(20);
+        //        return Json(movelocationList);
+        //    }
+        //}
+
+        // Location Autocomplete 
+        public ActionResult ROLocationAutocomplete(string loc, int whid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                List<string> locValues = new List<string>() { "Overstock", "Pick Location", "Pick Bin Location", "Floor Location" };
+
+                var movelocationList = (from w in db.Whlocations
+                                        where w.Whid.Equals(whid) && w.Location.ToUpper().StartsWith(loc.ToUpper()) && locValues.Contains(w.Locationtype) && w.Isactive == true
+                                        select new { w.Uniqueid, w.Location }).OrderBy(x => x.Location).ToList().Take(20);
+                return Json(movelocationList);
+            }
+        }
+
+        // Location Autocomplete 
+        public ActionResult LocationAutocomplete(string loc)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                List<string> locValues = new List<string>() { "Overstock", "Pick Location", "Pick Bin Location", "Floor Location" };
+
+                var movelocationList = (from w in db.Whlocations
+                                        where w.Location.ToUpper().Contains(loc.ToUpper()) && locValues.Contains(w.Locationtype) && w.Isactive == true
+                                        select new { w.Uniqueid, w.Location }).ToList().Take(20);
+                return Json(movelocationList);
+            }
+        }
+        public ActionResult LocationAutocompleteNew(string loc, int whid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                List<string> locValues = new List<string>() { "Overstock", "Pick Location", "Pick Bin Location", "Floor Location" };
+                var movelocationList = (from w in db.Whlocations
+                                        where w.Location.ToUpper().StartsWith(loc.ToUpper()) && locValues.Contains(w.Locationtype) && w.Isactive == true && w.Whid == whid
+                                        select new { w.Uniqueid, w.Location }).OrderBy(x => x.Location).ToList().Take(25);
+                return Json(movelocationList);
+            }
+        }
+        // Location Autocomplete include Quarantine
+        public ActionResult LocationAutocompleteQuarantine(string loc)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                List<string> locValues = new List<string>() { "Overstock", "Pick Location", "Pick Bin Location", "Quarantine", "Floor Location" };
+
+                var movelocationList = (from w in db.Whlocations
+                                        where w.Location.ToUpper().Contains(loc.ToUpper()) && locValues.Contains(w.Locationtype) && w.Isactive == true
+                                        select new { w.Uniqueid, w.Location }).ToList().Take(20);
+                return Json(movelocationList);
+            }
+        }
+
+        public ActionResult LocationAutocomplete2(string loc, int whLocId, string locType)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                List<string> locValues = new List<string>() { "Overstock", "Pick Location", "Pick Bin Location", "Floor Location" };
+
+                var movelocationList = (from w in db.Whlocations
+                                        join wh in db.Warehouses on w.Whid equals wh.Uniqueid
+                                        where w.Location.ToUpper().Contains(loc.ToUpper()) && w.Isactive == true
+                                        && (locType != null ? w.Locationtype.ToUpper().Equals(locType.ToUpper()) : locValues.Contains(w.Locationtype))
+                                        && (whLocId == 0 || w.Whid.Equals(whLocId))
+                                        select new { w.Uniqueid, w.Location, wh.Whname }).ToList().Take(20);
+                return Json(movelocationList);
+            }
+        }
+
+        //Load SKUs 
+        public ActionResult LoadSKUs()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var skuList = (from S in db.Skus
+                               select new { S.Skuid, S.Sku1, S.Clientid }).ToList();
+                return Json(skuList);
+            }
+        }
+
+        //Load Pallets 
+        public ActionResult LoadPallets()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var palletList = (from P in db.Whlocations
+                                  where (P.Isactive == true && P.Locationtype == "Pallet")
+                                  select new { P.Uniqueid, P.Location }).OrderBy(a => a.Uniqueid).ToList();
+                return Json(palletList);
+            }
+        }
+        public ActionResult LoadPalletsNew1(int whid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var palletList = (from P in db.Whlocations
+                                  where (P.Isactive == true && P.Locationtype == "Pallet" && P.Whid == whid)
+                                  select new { P.Uniqueid, P.Location }).OrderBy(a => a.Uniqueid).ToList();
+                return Json(palletList);
+            }
+        }
+        public ActionResult LoadPalletsnew(string loc)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var palletList = (from P in db.Whlocations
+                                  where (P.Isactive == true && P.Locationtype == "Pallet" && P.Location.ToUpper().Contains(loc.ToUpper()))
+                                  select new { P.Uniqueid, P.Location }).OrderBy(a => a.Uniqueid).ToList();
+                return Json(palletList);
+            }
+        }
+        public ActionResult LoadPalletsnew2(string loc, int whid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var palletList = (from P in db.Whlocations
+                                  where (P.Isactive == true && P.Whid == whid && P.Locationtype == "Pallet" && P.Location.ToUpper().StartsWith(loc.ToUpper()))
+                                  select new { P.Uniqueid, P.Location }).OrderBy(a => a.Uniqueid).ToList().Take(20);
+                return Json(palletList);
+            }
+        }
+
+        //Load Variance 
+        public ActionResult LoadVariance()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var VarianceList = (from V in db.AllStatuses
+                                    where (V.IsActive == true && V.StatusFor == "Variance Reason")
+                                    select new { V.StatusCode, V.Values }).ToList();
+                return Json(VarianceList);
+            }
+        }
+        //Get Tran Type
+        public ActionResult GetTranType()
+        {
+            using WMSContext db = new();
+            var result = db.Skuinventorylocationlogs.Select(c => new { c.Transtype })
+                      .ToList().Distinct();
+
+            return Json(result);
+        }
+
+        //Get All Users
+        public ActionResult GetAllUsers()
+        {
+            try
+            {
+                using (WMSContext db = new WMSContext())
+                {
+                    var result = (from u in db.Whusers
+                                  where u.Isactive == true
+                                  select new { u.Uniqueid, u.Username }).ToList();
+                    return Json(result);
+                }
+            }
+            catch (Exception e)
+            {
+                throw;
+            }
+        }
+
+        //Get Carriers
+        public ActionResult GetCarriers(int clientid)
+        {
+            try
+            {
+                using (WMSContext db = new WMSContext())
+                {
+                    var result = (from cs in db.Carrierservices
+                                  join c in db.Carriers on cs.Carrierid equals c.Carrierid
+                                  where cs.Clientid == clientid && cs.Isactive == true && c.Isactive == true
+                                  select new { c.Carrierid, c.Carriername }).Distinct().ToList();
+                    return Json(result);
+                }
+            }
+            catch (Exception)
+            {
+                throw;
+            }
+        }
+
+        //Get Carrier Service
+        public ActionResult GetCarrierService(int clientid, int carrierid)
+        {
+            try
+            {
+                using (WMSContext db = new WMSContext())
+                {
+                    var result = (from cs in db.Carrierservices
+                                  where cs.Clientid == clientid && cs.Carrierid == carrierid && cs.Isactive == true
+                                  select new
+                                  {
+                                      cs.Shipviaid,
+                                      cs.Shipvianame
+                                  }).Distinct().ToList();
+                    return Json(result);
+                }
+            }
+            catch (Exception)
+            {
+                throw;
+            }
+        }
+
+        //Load Order Type for Order Dashboard
+        public ActionResult LoadOrderType()
+        {
+            try
+            {
+                using (WMSContext db = new WMSContext())
+                {
+                    var orderType = db.Orders.Select(o => new { o.Ordertype }).Distinct().ToList();
+                    return Json(orderType);
+                }
+            }
+            catch (Exception)
+            {
+
+                throw;
+            }
+        }
+
+        //Load Order Type for Order Dashboard
+        public ActionResult LoadManifests()
+        {
+            try
+            {
+                using (WMSContext db = new WMSContext())
+                {
+                    var orderType = db.Manifests.Select(o => new { o.Manifeststatus }).Distinct().ToList();
+                    return Json(orderType);
+                }
+            }
+            catch (Exception)
+            {
+
+                throw;
+            }
+        }
+
+        //Load SKUs based on itemtype in Dynamic Kit, Prebuild Kit
+        public ActionResult LoadkitSKU(int Clientid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                //  var clientSkuList = db.Skus.ToList().OrderBy(S => S.Sku1).Where(S => S.Clientid == cid && S.Status == "Active");
+                var skuList = (from S in db.Skus
+                               where S.Clientid == Clientid && S.Status == "Active" && (S.Itemtype == "Dynamic KIT" || S.Itemtype == "Prebuild KIT")
+                               select new { S.Skuid, S.Sku1 }).ToList();
+                return Json(skuList);
+            }
+        }
+
+        //Load SKUs based on itemtype=Item
+        public ActionResult LoadComponentSKU(int Clientid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var skuList = (from S in db.Skus
+                               where S.Clientid == Clientid && S.Status == "Active" && S.Itemtype == "ITEM"
+                               select new
+                               {
+                                   S.Skuid,
+                                   S.Sku1
+                               }).ToList();
+                return Json(skuList);
+            }
+        }
+        // Load component sku1
+        public ActionResult LoadComponentSKU1(int Clientid, int itemid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var skuList = (from S in db.Skus
+                               join Sk in db.Skukitmappings on S.Skuid equals Sk.Kitskuid
+                               join S1 in db.Skus on Sk.Componentskuid equals S1.Skuid
+                               where S.Clientid == Clientid && S.Skuid == itemid && S.Status == "Active"
+                               select new
+                               {
+                                   Sk.Componentskuid,
+                                   S1.Sku1
+                               }).ToList();
+                return Json(skuList);
+            }
+        }
+
+        ////Load Client based on User
+        //public ActionResult LoadClientsForUser()
+        //{
+        //    int loginid = Convert.ToInt32(HttpContext.User.Claims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier)?.Value);
+        //    using (WMSContext db = new WMSContext())
+        //    {
+        //        try
+        //        {
+        //            var active_client = db.Whusers.Where(wu => wu.Uniqueid == loginid && wu.Allclientsaccess == true).Select(u => u.Uniqueid).FirstOrDefault();
+        //            if (active_client != 0)
+        //            {
+        //                return RedirectToAction("LoadClient");
+        //            }
+        //            else
+        //            {
+        //                var clients = (from wum in db.Whusermodules
+        //                               join wc in db.Whclients on wum.Clientid equals wc.Uniqueid  //whuserclients
+        //                               where wum.Userid == loginid   //active check
+        //                               select new
+        //                               {
+        //                                   wc.Uniqueid,
+        //                                   wc.Clientname
+        //                               }).Distinct().ToList();
+        //                return Json(clients);
+        //            }
+        //        }
+        //        catch (Exception)
+        //        {
+        //            throw;
+        //        }
+        //    }
+        //}
+        public ActionResult LoadRoChangeCodes()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var rochangeCodes = (from V in db.Rochargecodes
+                                     select new { V.Uniqueid, V.Code }).ToList();
+                return Json(rochangeCodes);
+            }
+        }
+        //Load Client based on User
+        public ActionResult LoadClientsForUser()
+        {
+            int loginid = Convert.ToInt32(HttpContext.User.Claims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier)?.Value);
+            using (WMSContext db = new WMSContext())
+            {
+                try
+                {
+                    var active_client = db.Whusers.Where(wu => wu.Uniqueid == loginid && wu.Allclientsaccess == true).Select(u => u.Uniqueid).FirstOrDefault();
+                    if (active_client != 0)
+                    {
+                        return RedirectToAction("LoadClient");
+                    }
+                    else
+                    {
+                        var clients = (from wuc in db.Whuserclients
+                                       join wc in db.Whclients on wuc.Clientid equals wc.Uniqueid
+                                       group new { wuc, wc } by new { wc.Clientname, wc.Isactive, wc.Uniqueid, wuc.Userid } into g
+                                       where g.Key.Isactive == true && g.Key.Userid == loginid
+                                       select new
+                                       {
+                                           g.Key.Clientname,
+                                           g.Key.Uniqueid,
+                                           g.Key.Userid
+                                       }).ToList();
+                        return Json(clients);
+                    }
+                }
+                catch (Exception)
+                {
+                    throw;
+                }
+            }
+        }
+        //Load Clients For User Management
+        public ActionResult LoadClientsForUserManagement()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                try
+                {
+                    var clients = (from w in db.Whclients
+                                   where w.Isactive == true
+                                   orderby w.Clientname
+                                   select new
+                                   {
+                                       w.Uniqueid,
+                                       w.Clientname
+                                   }).ToList();
+                    return Json(clients);
+
+                }
+                catch (Exception)
+                {
+                    throw;
+                }
+            }
+        }
+
+        //Load Client based on User
+        public ActionResult LoadClientsbyWHIDForUser(int WHid)
+        {
+            int loginid = Convert.ToInt32(HttpContext.User.Claims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier)?.Value);
+            List<Whclient> clients = new List<Whclient>();
+            using (WMSContext db = new WMSContext())
+            {
+                //int loginid = Convert.ToInt32(HttpContext.User.Claims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier)?.Value);
+                var userObj = db.Whusers.Where(w => w.Uniqueid == loginid).FirstOrDefault();
+                var clientList = db.Whclients.Where(x => x.Isactive == true && x.Warehouseid.Contains(WHid))
+                    .Select(c => new { c.Uniqueid, c.Clientname })
+                    .AsEnumerable() // execute the first query on the database server
+                                    .Concat(new[] { new { Uniqueid = 0, Clientname = "ALL" } })
+                      .ToList().OrderBy(a => a.Clientname);
+                if (userObj != null)
+                {
+                    if (userObj.Allclientsaccess)
+                    {
+                        return Json(clientList);
+                    }
+                    else
+                    {
+                        var clientAccessList = db.Whuserclients.Where(w => w.Userid == loginid && w.Isactive == true).ToList();
+                        foreach (var client in clientAccessList)
+                        {
+                            var fliterData = clientList.Where(a => a.Uniqueid == client.Clientid).FirstOrDefault();
+                            if (fliterData != null)
+                            {
+                                clients.Add(new Whclient { Uniqueid = fliterData.Uniqueid, Clientname = fliterData.Clientname });
+                            }
+                        }
+                        return Json(clients);
+                    }
+                }
+            }
+            return Json(clients);
+        }
+
+        //RO Load Client based on User 
+        public ActionResult ROLoadClientsbyWHIDForUser(int WHid)
+        {
+            int loginid = Convert.ToInt32(HttpContext.User.Claims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier)?.Value);
+            using (WMSContext db = new WMSContext())
+            {
+                try
+                {
+                    var active_client = db.Whusers.Where(wu => wu.Uniqueid == loginid && wu.Allclientsaccess == true).Select(u => u.Uniqueid).FirstOrDefault();
+                    if (active_client != 0)
+                    {
+                        return RedirectToAction("ROOrderLoadClient", new { warehouseid = WHid });
+                    }
+                    else
+                    {
+                        var clients = (from wuc in db.Whuserclients
+                                       join wc in db.Whclients on wuc.Clientid equals wc.Uniqueid
+                                       group new { wuc, wc } by new { wc.Warehouseid, wc.Clientname, wc.Isactive, wc.Uniqueid, wuc.Userid } into g
+                                       where g.Key.Isactive == true && g.Key.Userid == loginid && g.Key.Warehouseid.Contains(WHid)
+                                       select new
+                                       {
+                                           g.Key.Clientname,
+                                           g.Key.Uniqueid,
+                                           g.Key.Userid
+                                       }).ToList();
+                        return Json(clients);
+                    }
+                }
+                catch (Exception)
+                {
+                    throw;
+                }
+            }
+        }
+
+
+        // Load Sales Channel for Create Order in Order Dashboard
+        public ActionResult LoadSalesChannel()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var scList = db.Saleschannels.ToList();
+                return Json(scList);
+            }
+        }
+
+        public ActionResult LoadSalesChannelbasedonclientid(int clientid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                //var scList = db.Saleschannels.ToList();
+                var scList = (from s in db.Saleschannels
+                              join sm in db.Saleschannelmappings on s.Saleschannelid equals sm.Saleschannelid
+                              where sm.Clientid == clientid && sm.Isactive == true
+                              select new
+                              {
+                                  s.Saleschannel1,
+                                  s.Saleschannelid,
+                                  sm.Clientid
+                              }).OrderBy(a => a.Saleschannel1).ToList();
+                return Json(scList);
+            }
+        }
+
+
+        //Get Previous Address for Create Order in Order Dashboard
+        public ActionResult GetPreviousAddress(int cid)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                // var data = db.Clientaddressbooks.Where(c => c.Clientid == cid).GroupBy(c => c.Clientid).Select(c=>c.OrderByDescending(c=>c.Uniqueid).First()).ToList();
+
+                var data = (from o in db.Orders
+                            join os in db.Ordersshipments on o.Orderid equals os.Orderid
+                            where o.Clientid == cid
+                            group new { o, os } by new { os.Shipcustomername, os.Shipcompanyname, os.Shipaddress1, os.Shipaddress2, os.Shipcity, os.Shipstate, os.Shippostalcode } into grp
+                            select new { grp.Key.Shipcustomername, grp.Key.Shipcompanyname, grp.Key.Shipaddress1, grp.Key.Shipaddress2, grp.Key.Shipcity, grp.Key.Shipstate, grp.Key.Shippostalcode, uniqueid = grp.Select(x => x.os.Uniqueid).First() }
+                                                ).ToList();
+                //uniqueid=grp.Select(x=>x.os.Uniqueid), ss = grp.OrderBy(o => o.os.Uniqueid).ToList()
+                return Json(data);
+            }
+        }
+
+        //Get ShipmentData for Create Order in Order Dashboard
+        public ActionResult GetShipmentData(int previousaddressval)
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var data = db.Ordersshipments.Where(os => os.Uniqueid == previousaddressval).FirstOrDefault();
+                return Json(data);
+            }
+        }
+        //Get Sku Hazamat Class
+        public ActionResult LoadHazamatClass()
+        {
+            using (WMSContext db = new WMSContext())
+            {
+                var hazmatList = db.Hazmats.Where(x => x.Isactive == true).ToList();
+                return Json(hazmatList);
+            }
+        }
+    }
+}
