@@ -1,0 +1,448 @@
+const { useState, useEffect, useRef } = React;
+const { Table, AutoComplete, Button, Select, Space, Input, DatePicker, Form } = antd;
+const { Option } = Select;
+const { SearchOutlined } = icons;
+function RoReport() {
+    const [clientData, setClientData] = useState([]);
+    const [selectedClient, setSelectedClient] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [errorMessageClient, setErrorMessageClient] = useState('');
+    const [skuData, setSkuData] = useState([]);
+    const [selectedSKU, setSelectedSKU] = useState(null);
+    const [roNumber, setRoNumber] = useState('');
+    const [startDate, setStartDate] = useState(null);
+    const [endDate, setEndDate] = useState(null);
+    const [model, setmodel] = useState({});
+    const [Exceldata, setExceldata] = useState('');
+    const [tableData, setTableData] = useState([]);
+    const [dataLoaded, setDataLoaded] = useState(false);
+    const [searchValue, setSearchValue] = useState("");
+    const [sortingCol, setSortingCol] = useState("");
+    const [sortingDir, setSortingDir] = useState("");
+    const [searchQuery, setSearchQuery] = useState(null);
+    const [totalRecords, setTotalRecords] = useState(0);
+    const [pageSize, setPageSize] = useState(50);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [Length1, setLength1] = useState(200);
+    const [start, setStart] = useState(0);
+   
+    const clearForm = () => {
+        setSelectedClient('');
+        setSelectedSKU('');
+        setRoNumber('');
+        setStartDate(null);
+        setEndDate(null);
+        setDataLoaded(false);
+    };
+
+    useEffect(() => {
+        $.getJSON("/Base/LoadClient", function (data) {
+            setClientData(data);
+        });
+    }, []);
+
+    useEffect(() => {
+        if (selectedClient) {
+            setLoading(true);
+            $.getJSON("/Base/LoadReportClientTypeSKUs/", { clientid: selectedClient })
+                .done((data) => {
+                    if (data && data.length > 0) {
+                        setSkuData(data);
+                        setErrorMessageClient('');
+                    } else {
+                        setSkuData([]);
+                        setErrorMessageClient('No SKU data available for the selected client.');
+                    }
+                })
+                .fail((jqXHR, textStatus, errorThrown) => {
+                    setErrorMessageClient('Error loading SKU data.');
+                    console.error('Error loading SKU data:', textStatus, errorThrown);
+                })
+                .always(() => {
+                    setLoading(false);
+                });
+        } else {
+            setSkuData([]);
+            setErrorMessageClient('');
+        }
+    }, [selectedClient]);
+
+
+
+    //const onFinish = async (values) => {
+    //    // Handle form submission (if needed)
+    //    console.log('Form submitted with values:', values);
+    //};
+    const onFinish = async (values) => {
+        console.log('values',values)
+        const _rosearchmodel = {
+            ...values,
+        };
+        console.log('_rosearchmodel', _rosearchmodel)
+        setmodel(_rosearchmodel);
+        ordersData(_rosearchmodel, start, currentPage, pageSize, Length1, searchQuery);
+    };
+
+
+    const ordersData = (_rosearchmodel, start, currentPage, pageSize, Length1, searchQuery, sortingCol, sortingDir) => {
+        $.ajax({
+            type: "POST",
+            url: "/report/SearchROreport",
+            data: {
+                _rosearchmodel: _rosearchmodel,
+                skip: start,
+                draw: currentPage,
+                pagesize: pageSize,
+                length: Length1,
+                searchvalue: searchQuery,
+                sortColumn: sortingCol,
+                sortColumnDirection: sortingDir,
+            },
+            beforeSend: function () {
+                $("#start-loading").loading("start");
+            },
+            success: function (result) {
+                console.log('result', result)
+                $("#start-loading").loading("stop");
+                if (result.responsecode == 200) {
+                    setTableData(result.data);
+                    setTotalRecords(result?.sTotal);
+                    setExceldata(_rosearchmodel);
+                } else {
+                    swal(result.responsemessage);
+                    $("#start-loading").loading("stop");
+                }
+            },
+            complete: function () { },
+            error: function (error) {
+                $("#start-loading").loading("stop");
+                swal({
+                    title: "Server Error",
+                    text: error,
+                });
+            }
+        });
+    };
+    const exportToXlsx = (searchQuery) => {
+        const sendobj = {
+            clientid: model.clientid
+        }
+        $.ajax({
+            type: "POST",
+            url: "/report/ExcelROreport/",
+            data: {
+                _rosearchmodel: model,
+                searchvalue: searchValue
+            },
+            beforeSend: function () {
+                $("#start-loading").loading("start");
+            },
+            success: function (data) {
+                $("#start-loading").loading("stop");
+                const exportData = data.data.map(item => ({
+                    clientname: item.clientname,
+                    sku: item.sku1,
+                    description: item.description,
+                    availableqty: item.availableqty,
+                    allocatedqty: item.allocatedqty,
+                    lotcode: item.lotcode,
+                    palletname: item.palletname,
+                    lotexp: item.lotexp,
+                    location: item.location,
+                    uniqueid: item.uniqueid
+                }));
+                const wb = XLSX.utils.book_new();
+                const ws = XLSX.utils.json_to_sheet(exportData);
+                XLSX.utils.book_append_sheet(wb, ws, "Data");
+                XLSX.writeFile(wb, "roreport.xlsx");
+            },
+            error: function (err) {
+                $("#start-loading").loading("stop");
+            }
+        });
+    };
+
+
+    const handleSearchForPagination = (value) => {
+        setSearchQuery(value);
+        setSearchValue(value);
+        ordersData(model, 0, 1, pageSize, Length1, value);
+    };
+
+    const handleClientChange = (value) => {
+        setSelectedClient(value);
+        setSkuData([]); 
+        setSelectedSKU('');
+        setErrorMessageClient('');
+    };
+
+    const handleSKUSelect = (value) => {
+        setSelectedSKU(value);
+    };
+
+    const handleInputChange = (e) => {
+        setRoNumber(e.target.value);
+    };
+
+    const handleStartDateChange = (date, dateString) => {
+        setStartDate(date);
+    };
+
+    const handleEndDateChange = (date, dateString) => {
+        setEndDate(date);
+    };
+
+   
+    const Sort_Page_Function = (pagination, filters, sorter) => {
+        const pageValue = pagination.current;
+        const pageSizeValue = pagination.pageSize;
+        const newStart = (pageValue - 1) * pageSize;
+
+       
+        const textcol = sorter.field ? sorter.field : null;
+        const direction = sorter.order ? sorter.order : null;
+
+        setSortingCol(textcol);
+        setSortingDir(direction);
+        setCurrentPage(pageValue);
+        setStart(newStart);
+
+        ordersData(model, newStart, pageValue, pageSizeValue, Length1, searchQuery, textcol, direction);
+    };
+
+
+   
+  
+    const columns = [
+        {
+            title: 'RO#',
+            dataIndex: 'ronumber',
+            key: '1',
+            align: 'left',
+            sorter: true,
+
+        },
+        {
+            title: 'RO Transaction Date',
+            dataIndex: 'transactionStartDate',
+            key: '2',
+            align: 'left',
+            sorter: true,
+        },
+        {
+            title: 'SKU',
+            dataIndex: 'sku1',
+            key: '3',
+            align: 'left',
+            sorter: true,
+        },
+        {
+            title: 'RO Qty',
+            dataIndex: 'roQty',
+            key: '4',
+            align: 'center',
+            sorter: true,
+        },
+        {
+            title: 'Received Qty',
+            dataIndex: 'receivedQty',
+            key: '5',
+            align: 'center',
+            sorter: true,
+        },
+        {
+            title: 'Lot Code',
+            dataIndex: 'lotcode',
+            key: '6',
+            align: 'center',
+            sorter: true,
+        },
+        {
+            title: 'Lot Exp',
+            dataIndex: 'lotexp',
+            key: '7',
+            align: 'center',
+            sorter: true,
+        },
+
+    ];
+
+
+    const onShowSizeChange = (current, pageSize) => {
+        setPageSize(pageSize);
+    };
+
+    return (
+        <div>
+            <Form
+                name="basic"
+                initialValues={{
+                    remember: true,
+                }}
+                onFinish={onFinish}
+            >
+                <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+                    <div style={{ width: '300px' }}>
+                        <Form.Item
+                            label="Client"
+                            name="clientid"
+                            rules={[{ required: true, message: 'Please select a client!' }]}
+                        >
+                            <Select
+                                placeholder="Select Client"
+                                onChange={handleClientChange}
+                                value={selectedClient}
+                                showSearch
+                                optionFilterProp="children"
+                                loading={loading}
+                                style={{ width: '100%' }}
+                            >
+                                {clientData.map((client) => (
+                                    <Option key={client.uniqueid} value={client.uniqueid}>
+                                        {client.clientname}
+                                    </Option>
+                                ))}
+                            </Select>
+                        </Form.Item>
+                        {errorMessageClient && (
+                            <div style={{ color: 'red', marginLeft: '10px' }}>
+                                {errorMessageClient}
+                            </div>
+                        )}
+                    </div>
+
+                    <div style={{ width: '300px' }}>
+                        <Form.Item label="SKU" name="sku">
+                            <Select
+                                placeholder="Select SKU"
+                                loading={loading}
+                                showSearch
+                                optionFilterProp="children"
+                                style={{ width: '100%' }}
+                                onChange={handleSKUSelect}
+                                value={selectedSKU}
+                            >
+                                {skuData.map((sku) => (
+                                    <Option key={sku.skuid} value={sku.skuid}>
+                                        {sku.sku1}
+                                    </Option>
+                                ))}
+                            </Select>
+                        </Form.Item>
+                    </div>
+
+                    <div style={{ width: '300px' }}>
+                        <Form.Item label="RO Number" name="roNumber">
+                            <Input
+                                placeholder="Enter RO Number"
+                                value={roNumber}
+                                onChange={handleInputChange}
+                                style={{ width: '100%' }}
+                            />
+                        </Form.Item>
+                    </div>
+                    <div style={{ width: '300px' }}>
+                        <Form.Item label="Lot Code" name="lotcode">
+                            <Input
+                                placeholder="Enter Lotcode"
+                                value={roNumber}
+                                onChange={handleInputChange}
+                                style={{ width: '100%' }}
+                            />
+                        </Form.Item>
+                    </div>
+                    <div style={{ width: '300px' }}>
+                        <Form.Item label="Start Date" name="startDate">
+                            <DatePicker
+                                style={{ width: '100%' }}
+                                placeholder="Start Date"
+                                value={startDate}
+                                onChange={handleStartDateChange}
+                                format="MM/DD/YYYY"
+                            />
+                        </Form.Item>
+                    </div>
+
+                    <div style={{ width: '300px' }}>
+                        <Form.Item label="End Date" name="endDate">
+                            <DatePicker
+                                style={{ width: '100%' }}
+                                placeholder="End Date"
+                                onChange={handleEndDateChange}
+                                value={endDate}
+                                format="MM/DD/YYYY"
+                            />
+                        </Form.Item>
+                    </div>
+
+                    <div>
+                        <Form.Item>
+                            <Button
+                                type="primary"
+                                htmlType="submit"
+                                style={{
+                                    backgroundColor: '#00875a',
+                                    borderColor: '#00875a',
+                                    color: 'white',
+                                    marginLeft: '20px',
+                                    marginTop: '31px',
+                                }}
+                                icon={<SearchOutlined style={{ color: 'white' }} />}
+                            >
+                                Search
+                            </Button>
+                            <Button
+                                onClick={clearForm}
+                                style={{
+                                    backgroundColor: '#fbc66c',
+                                    borderColor: '#fbc66c',
+                                    color: 'white',
+                                    marginLeft: '10px',
+                                    marginTop: '31px',
+                                }}
+                            >
+                                Clear
+                            </Button>
+                        </Form.Item>
+                    </div>
+                </div>
+            </Form>
+
+                <div style={{ marginTop: '50px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                        <Button
+                            id="DLtoExcel"
+                            style={{ backgroundColor: '#c4c8dc', borderColor: '#c4c8dc', color: 'black' }}
+                            onClick={() => exportToXlsx(Exceldata, searchQuery)}
+                        >
+                            EXCEL
+                        </Button>
+                        <AutoComplete
+                            style={{ width: '12em', paddingRight: '6px', paddingBottom: '3px' }}
+                            placeholder="Search by..."
+                        onChange={(value) => handleSearchForPagination(value)}
+                            value={searchQuery}
+                        />
+                    </div>
+                    <Table
+                    columns={columns}
+                    dataSource={tableData}
+                     sorter={true}
+                      onChange={Sort_Page_Function}
+                       loading={loading}
+                        pagination={{
+                            total: totalRecords,
+                            pageSize: pageSize,
+                            showTotal: (total, range) => `${range[0]}-${range[1]} of ${totalRecords} Items`,
+                            current: currentPage,
+                            onShowSizeChange: onShowSizeChange,
+                            defaultPageSize: pageSize,
+                        }}
+                    />
+                </div>
+            
+        </div>
+    );
+}
+
+ReactDOM.render(<RoReport />, document.getElementById('myDivReport'));
