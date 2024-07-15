@@ -1,0 +1,23 @@
+version: '3'
+services:
+  webapp:
+    image: aravindaravind/webapp:latest
+    ports:
+      - "8013:80"
+    networks:
+      - app-network
+
+  varnish:
+    image: varnish:latest
+    ports:
+      - "8081:80"
+    volumes:
+      - ./default.vcl:/etc/varnish/default.vcl
+    depends_on:
+      - webapp
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
